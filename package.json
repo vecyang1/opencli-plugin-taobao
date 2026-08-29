@@ -1,0 +1,25 @@
+{
+  "name": "opencli-plugin-taobao",
+  "version": "1.0.0",
+  "description": "Taobao buyer chat history, 10-year orders, bought shops, favorites, and semantic reasoning suite for OpenCLI",
+  "type": "module",
+  "main": "opencli-plugin.json",
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "opencli",
+    "opencli-plugin",
+    "taobao",
+    "chat",
+    "orders",
+    "favorites",
+    "agentic"
+  ],
+  "author": "Vec Yang",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vecyang1/opencli-plugin-taobao.git"
+  }
+}
