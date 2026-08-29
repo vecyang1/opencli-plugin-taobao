@@ -42,7 +42,7 @@ cp -r clis/taobao ~/.opencli/clis/
 opencli taobao sessions --limit 20 -f table
 
 # 2. Extract full chat history with a seller (auto backward pagination)
-opencli taobao chat "鑫鼎数码专营店" --limit 50 -f table
+opencli taobao chat "某数码专营店" --limit 50 -f table
 
 # 3. Extract 10-year historical orders (bought items)
 opencli taobao orders --pages 3 -f table
@@ -57,10 +57,10 @@ opencli taobao favorites --limit 20 -f table
 opencli taobao cart -f table
 
 # 7. AI Semantic Reasoning on seller commitments & dispute evidence
-opencli taobao reason "美日韩电玩" -f yaml
+opencli taobao reason "某官方旗舰店" -f yaml
 
 # 8. Export chat history to Markdown / HTML
-opencli taobao export "郭氏永盛旗舰店" --format html --output ./guoshi.html
+opencli taobao export "某品牌专卖店" --format html --output ./chat.html
 
 # 9. High-speed batch sync
 opencli taobao sync --limit 30 -f json
