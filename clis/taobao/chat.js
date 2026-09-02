@@ -20,7 +20,7 @@ export const command = cli({
   browser: true,
   navigateBefore: false,
   args: [
-    { name: 'seller', positional: true, required: true, help: '卖家店铺名称或会话CID (例如: 郭氏永盛旗舰店 或 998877665544.1-...)' },
+    { name: 'seller', positional: true, required: true, help: '卖家店铺名称或会话CID (例如: 某数码专营店 或 <cid>@cntaobao)' },
     { name: 'limit', type: 'int', default: 100, help: '拉取最大消息条数 (默认 100, 最大 5000)' },
     { name: 'all', type: 'bool', default: false, help: '是否拉取该店铺全部历史消息' },
     { name: 'order', type: 'str', default: 'asc', help: '排序方式: asc (正序/时间先后) 或 desc (倒序/最新在前)' },

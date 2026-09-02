@@ -28,7 +28,7 @@
 opencli plugin install github:vecyang1/opencli-plugin-taobao
 ```
 
-Or manually link:
+Or manually copy (OpenCLI does not load symlinks):
 ```bash
 cp -r clis/taobao ~/.opencli/clis/
 ```
