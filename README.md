@@ -90,6 +90,15 @@ mkdir -p ~/.opencli/clis/taobao && cp clis/taobao/*.js ~/.opencli/clis/taobao/ &
 opencli list | grep -A20 '^  taobao'   # receipt: the plugin commands must be listed
 ```
 
+## 🧪 Verifying adapter changes
+
+Each command injects a browser script as a template literal passed to ``page.evaluate(`…`)``. `node --check` on the adapter file cannot see inside that string, so a syntax error there only surfaces when the command runs against a logged-in browser (1.1.0 shipped `senderNick` declared twice in `sync.js` and `chat.js`; fixed in 1.1.1). Parse the injected scripts at test time — the sibling `taobao-chat-cli` project does this in `tests/adapter_scripts.test.js` — and run each changed command once while logged in before publishing.
+
+## 📝 Changelog
+
+- **1.1.1** — fix: the `sync`/`chat` injected scripts failed to parse (`senderNick` declared twice) since 1.1.0's sanitize commit; empty custom payloads no longer render as `{}`; `sync --msg-limit` help states its 20–2000 clamp.
+- **1.1.0** — `sync --offset` for chunked sync; typed `AUTH_REQUIRED` on the login redirect; README/help privacy scrub.
+
 ## 📄 License
 
 This project is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0-or-later)](./LICENSE).

@@ -23,7 +23,7 @@ export const command = cli({
     { name: 'limit', type: 'int', default: 30, help: '批量同步的会话数量 (默认 30, 最大 500)' },
     { name: 'offset', type: 'int', default: 0, help: '跳过前 N 个会话 (用于分批推进, 默认 0)' },
     { name: 'all', type: 'bool', default: false, help: '是否同步账号下全部店铺的所有历史聊天记录' },
-    { name: 'msg-limit', type: 'int', default: 200, help: '每个店铺最大拉取消息数 (默认 200)' },
+    { name: 'msg-limit', type: 'int', default: 200, help: '每个店铺最大拉取消息数 (默认 200, 范围 20-2000; --all 时固定 2000)' },
   ],
   columns: [
     'seller',
@@ -168,12 +168,12 @@ export const command = cli({
                   
                   const currentUserId = (sdk?.context?.base?.currentUserId || sdk?.context?.base?.userId || window.g_config?.nick || '').toLowerCase();
                   const senderUid = (msg.sender?.uid || msg.senderUid || '').toLowerCase();
-                  const senderNick = (msg.extension?.sender_nick || '').toLowerCase();
+                  const senderNickLower = (msg.extension?.sender_nick || '').toLowerCase();
                   const isSelf = msg.isSelf === true || 
                                  msg.from?.isSelf === true ||
                                  msg.sender?.role === 'buyer' ||
                                  msg.direction === 'send' ||
-                                 (currentUserId && (senderUid.includes(currentUserId) || senderNick.includes(currentUserId))) ||
+                                 (currentUserId && (senderUid.includes(currentUserId) || senderNickLower.includes(currentUserId))) ||
                                  (msg.sender?.isSeller === false);
                   
                   let text = '';

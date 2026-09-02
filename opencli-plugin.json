@@ -1,6 +1,6 @@
 {
   "name": "taobao",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Taobao buyer chat history, 10-year orders, bought shops, favorites, and semantic reasoning suite for OpenCLI",
   "opencli": ">=1.8.6"
 }
