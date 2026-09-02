@@ -44,6 +44,15 @@ export const command = cli({
       await page.wait?.(3);
     }
 
+    // Auth guard at the chokepoint: when the session is logged out Taobao
+    // redirects the IM page to login.taobao.com, and any iframe access then
+    // throws a cross-origin SecurityError that reads like a page bug. Detect
+    // the redirect and raise the typed auth error every consumer can act on.
+    const landedUrl = String(await page.evaluate(`location.href`));
+    if (/login\.taobao\.com|login\.tmall\.com|\/member\/login/i.test(landedUrl)) {
+      throw new AuthRequiredError('taobao.com', '淘宝未登录 (页面已跳转到登录页)。请先运行: opencli taobao login');
+    }
+
     const evalResult = unwrapEvaluateResult(await page.evaluate(`
       (async () => {
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));

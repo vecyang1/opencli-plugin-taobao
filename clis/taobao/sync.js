@@ -1,5 +1,5 @@
 import { cli, Strategy } from '@jackwener/opencli/registry';
-import { CommandExecutionError } from '@jackwener/opencli/errors';
+import { CommandExecutionError, AuthRequiredError } from '@jackwener/opencli/errors';
 
 export function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === 'object' && 'session' in payload && 'data' in payload) {
@@ -21,6 +21,7 @@ export const command = cli({
   navigateBefore: false,
   args: [
     { name: 'limit', type: 'int', default: 30, help: '批量同步的会话数量 (默认 30, 最大 500)' },
+    { name: 'offset', type: 'int', default: 0, help: '跳过前 N 个会话 (用于分批推进, 默认 0)' },
     { name: 'all', type: 'bool', default: false, help: '是否同步账号下全部店铺的所有历史聊天记录' },
     { name: 'msg-limit', type: 'int', default: 200, help: '每个店铺最大拉取消息数 (默认 200)' },
   ],
@@ -34,6 +35,7 @@ export const command = cli({
   func: async (page, kwargs) => {
     const isAll = Boolean(kwargs?.all);
     const sessionLimit = isAll ? 500 : Math.max(1, Math.min(Number(kwargs?.limit) || 30, 500));
+    const offset = Math.max(0, Number(kwargs?.offset) || 0);
     const msgLimit = isAll ? 2000 : Math.max(20, Math.min(Number(kwargs?.['msg-limit']) || 200, 2000));
 
     // Ensure on chat page
@@ -43,10 +45,20 @@ export const command = cli({
       await page.wait?.(3);
     }
 
+    // Auth guard at the chokepoint: when the session is logged out Taobao
+    // redirects the IM page to login.taobao.com, and any iframe access then
+    // throws a cross-origin SecurityError that reads like a page bug. Detect
+    // the redirect and raise the typed auth error every consumer can act on.
+    const landedUrl = String(await page.evaluate(`location.href`));
+    if (/login\.taobao\.com|login\.tmall\.com|\/member\/login/i.test(landedUrl)) {
+      throw new AuthRequiredError('taobao.com', '淘宝未登录 (页面已跳转到登录页)。请先运行: opencli taobao login');
+    }
+
     const evalResult = unwrapEvaluateResult(await page.evaluate(`
       (async () => {
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         const sessionLimit = ${Number(sessionLimit)};
+        const offset = ${Number(offset)};
         const msgLimit = ${Number(msgLimit)};
         
         let iframe = document.querySelector('iframe');
@@ -102,7 +114,7 @@ export const command = cli({
           return tB - tA;
         });
         
-        const targetConvs = allConvs.slice(0, sessionLimit);
+        const targetConvs = allConvs.slice(offset, offset + sessionLimit);
         const results = [];
         
         for (let i = 0; i < targetConvs.length; i++) {
@@ -117,7 +129,7 @@ export const command = cli({
           const unread = c.unreadCount || content.unReadNumber || 0;
           
           const sessionObj = {
-            rank: i + 1,
+            rank: offset + i + 1,
             seller: sellerName,
             cid: cid,
             last_message: (content.lastMessageSummary?.content || c.latestMessage?.summary || '').slice(0, 80),

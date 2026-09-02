@@ -64,9 +64,31 @@ opencli taobao export "某品牌专卖店" --format html --output ./chat.html
 
 # 9. High-speed batch sync
 opencli taobao sync --limit 30 -f json
+# Chunked / resumable sync: skip the first N conversations (added in 1.1.0).
+# Without --offset every call re-syncs the top N; chunked callers must advance it.
+opencli taobao sync --offset 30 --limit 30 -f json
 ```
 
 ---
+
+## 🔐 Login state
+
+When the browser session is logged out, Taobao redirects the IM page to `login.taobao.com`; every chat-page command (`sessions`, `chat`, `sync`, `reason`, `export`) then raises a typed `AUTH_REQUIRED` (exit 77) instead of a cross-origin `SecurityError`. Fix it with:
+
+```bash
+opencli taobao login
+```
+
+Note for consumers: OpenCLI prints its error envelope as YAML even under `-f json`, and folds long messages across lines.
+
+## 🧩 Installing a local override
+
+OpenCLI's local-override loader (`~/.opencli/clis/<site>/`) does **not** follow symlinks — neither a symlinked site directory nor symlinked `.js` files load (measured on v1.8.7). Copy real files and restart the daemon:
+
+```bash
+mkdir -p ~/.opencli/clis/taobao && cp clis/taobao/*.js ~/.opencli/clis/taobao/ && opencli daemon restart
+opencli list | grep -A20 '^  taobao'   # receipt: the plugin commands must be listed
+```
 
 ## 📄 License
 
