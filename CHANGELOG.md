@@ -1,0 +1,25 @@
+# Changelog - OpenCLI Plugin Taobao
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.1.1] - 2026-09-02
+
+### Fixed
+- Fixed injected script parsing in `sync` and `chat` commands after role sanitization.
+- Cleaned empty custom payload formatting to prevent rendering empty `{}` brackets in message logs.
+- Sanitized hardcoded usernames and contact identifiers across examples and help documentation.
+
+## [1.1.0] - 2026-08-30
+
+### Added
+- **Time Offset Synchronization (`sync --offset`)**: Added backward-offset time cursor pagination to extract historical chat threads.
+- **Typed Auth Error Contracts**: Added explicit `AUTH_REQUIRED` status code and guidance when redirected to Taobao login pages.
+
+## [1.0.0] - 2026-08-29
+
+### Added
+- Initial release of `opencli-plugin-taobao`.
+- Browser-bridge integration accessing buyer chat histories, 10-year historical order ledgers, purchased shop directories, and saved favorites without triggering bot detection.
