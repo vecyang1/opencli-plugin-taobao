@@ -57,8 +57,12 @@ export const command = cli({
 
     const isAuth = await page.evaluate(`
       (() => {
+        const href = window.location.href || '';
+        if (href.includes('login.taobao.com') || window.location.hostname.includes('login')) {
+          return false;
+        }
         const text = document.body ? (document.body.innerText || '') : '';
-        if (text.includes('登录') && !text.includes('所有宝贝') && !text.includes('综合')) {
+        if (text.includes('亲，请登录') || (text.includes('登录') && !text.includes('所有宝贝') && !text.includes('综合'))) {
           return false;
         }
         return true;
@@ -67,6 +71,21 @@ export const command = cli({
 
     if (!isAuth) {
       throw new AuthRequiredError('淘宝搜索市场数据需要已登录的浏览器会话');
+    }
+
+    const isBlocked = await page.evaluate(`
+      (() => {
+        const text = document.body ? (document.body.innerText || '') : '';
+        const href = window.location.href || '';
+        if (href.includes('sec.taobao.com') || text.includes('按住滑块') || text.includes('RGV587') || document.querySelector('#nc_1_wrapper, .nc-container')) {
+          return true;
+        }
+        return false;
+      })()
+    `);
+
+    if (isBlocked) {
+      throw new Error('CAPTCHA_REQUIRED: 触发淘宝人机验证滑块，请在浏览器中滑动完成验证后重试');
     }
 
     const allItems = [];
@@ -89,7 +108,7 @@ export const command = cli({
       const pageItems = await page.evaluate(`
         (() => {
           const results = [];
-          const links = Array.from(document.querySelectorAll('a[href*="item.taobao.com/item.htm"], a[href*="detail.tmall.com/item.htm"]'));
+          const links = Array.from(document.querySelectorAll('a[href*="item.taobao.com/item.htm"], a[href*="detail.tmall.com/item.htm"], a[href*="chaoshi.detail.tmall.com/item.htm"]'));
 
           for (const a of links) {
             const href = a.getAttribute('href') || '';
@@ -116,13 +135,21 @@ export const command = cli({
             }
 
             let price = '0';
-            const priceMatch = cardText.match(/[¥￥]\\s*([\\d.]+)/);
-            if (priceMatch) {
-              price = priceMatch[1];
+            const intEl = card ? card.querySelector('[class*="priceInt--"], [class*="PriceInt--"]') : null;
+            const floatEl = card ? card.querySelector('[class*="priceFloat--"], [class*="PriceFloat--"]') : null;
+            if (intEl && intEl.innerText.trim()) {
+              price = intEl.innerText.trim() + (floatEl ? floatEl.innerText.trim() : '');
+            } else {
+              const priceEl = card ? card.querySelector('[class*="priceWrapper--"], [class*="price--"], [class*="Price--"], [class*="mainPrice"]') : null;
+              const textToMatch = priceEl ? priceEl.innerText : cardText;
+              const priceMatch = textToMatch.match(/[¥￥]\\s*([\\d.]+)/);
+              if (priceMatch) {
+                price = priceMatch[1];
+              }
             }
 
             let sales = '0人付款';
-            const salesMatch = cardText.match(/(\\d+(?:\\.\\d+)?[万kw]?\\+?)人付款|(\\d+(?:\\.\\d+)?[万kw]?\\+?)人收货|已售\\s*(\\d+)/);
+            const salesMatch = cardText.match(/(\\d+(?:\\.\\d+)?[万kw]?\\+?)\\s*人付款|(\\d+(?:\\.\\d+)?[万kw]?\\+?)\\s*人收货|已售\\s*(\\d+)/);
             if (salesMatch) {
               sales = salesMatch[0];
             }
@@ -179,22 +206,52 @@ export const command = cli({
         }
       }
 
-      if (allItems.length >= limit || p >= maxPages) break;
+      if (allItems.length >= limit || p >= maxPages || pageItems.length === 0) break;
 
       const hasNext = await page.evaluate(`
         (() => {
-          const nextBtn = document.querySelector('.ant-pagination-next button, .ant-pagination-next .ant-pagination-item-link, .next-pagination-item-link');
-          const isDisabled = document.querySelector('.ant-pagination-next') ? document.querySelector('.ant-pagination-next').classList.contains('ant-pagination-disabled') : false;
-          if (nextBtn && !isDisabled) {
-            nextBtn.click();
-            return true;
+          const selectors = [
+            '.next-pagination-item.next-next',
+            'button.next-next',
+            'button.next-btn',
+            'a.next-btn',
+            '.next-pagination-item-next',
+            'button[aria-label="下一页"]',
+            'button[aria-label="Next Page"]',
+            '.ant-pagination-next button',
+            '.ant-pagination-next .ant-pagination-item-link',
+            '.next-pagination-item-link'
+          ];
+          let nextBtn = null;
+          for (const s of selectors) {
+            const el = document.querySelector(s);
+            if (el) {
+              nextBtn = el;
+              break;
+            }
+          }
+          if (!nextBtn) {
+            const allBtns = Array.from(document.querySelectorAll('button, a, div[role="button"], span.next'));
+            nextBtn = allBtns.find(el => el.innerText && (el.innerText.trim() === '下一页' || (el.innerText.trim().includes('下一页') && el.innerText.trim().length <= 6)));
+          }
+          if (nextBtn) {
+            const isDisabled = nextBtn.disabled || nextBtn.classList.contains('disabled') || (nextBtn.getAttribute('aria-disabled') === 'true') || (nextBtn.closest('.next-pagination-item') && nextBtn.closest('.next-pagination-item').classList.contains('disabled'));
+            if (!isDisabled) {
+              nextBtn.click();
+              return true;
+            }
           }
           return false;
         })()
       `);
 
-      if (!hasNext) break;
-      await page.wait(3);
+      if (hasNext) {
+        await page.wait(3);
+      } else {
+        const nextPageUrl = searchUrl + (searchUrl.includes('?') ? '&' : '?') + 's=' + (p * 44) + '&page=' + (p + 1);
+        await page.goto(nextPageUrl);
+        await page.wait(3);
+      }
     }
 
     return allItems.slice(0, limit);
