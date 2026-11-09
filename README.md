@@ -1,5 +1,6 @@
 # 🛍️ opencli-plugin-taobao
 
+[![Latest Release](https://img.shields.io/github/v/release/vecyang1/opencli-plugin-taobao)](https://github.com/vecyang1/opencli-plugin-taobao/releases/latest)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![OpenCLI](https://img.shields.io/badge/OpenCLI->=1.8.6-orange.svg)](https://github.com/jackwener/OpenCLI)
 
