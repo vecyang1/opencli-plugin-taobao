@@ -59,10 +59,13 @@ opencli taobao cart -f table
 # 7. AI Semantic Reasoning on seller commitments & dispute evidence
 opencli taobao reason "某官方旗舰店" -f yaml
 
-# 8. Export chat history to Markdown / HTML
+# 8. Market research across active listings
+opencli taobao market "小个子秋装连衣裙" --pages 2 -f table
+
+# 9. Export chat history to Markdown / HTML
 opencli taobao export "某品牌专卖店" --format html --output ./chat.html
 
-# 9. High-speed batch sync
+# 10. High-speed batch sync
 opencli taobao sync --limit 30 -f json
 # Chunked / resumable sync: skip the first N conversations (added in 1.1.0).
 # Without --offset every call re-syncs the top N; chunked callers must advance it.
@@ -96,6 +99,7 @@ Each command injects a browser script as a template literal passed to ``page.eva
 
 ## 📝 Changelog
 
+- **1.3.0** — feat: `opencli taobao market` adapter for active Taobao market research with price, sales, shop, service tags, and multi-page pagination.
 - **1.1.1** — fix: the `sync`/`chat` injected scripts failed to parse (`senderNick` declared twice) since 1.1.0's sanitize commit; empty custom payloads no longer render as `{}`; `sync --msg-limit` help states its 20–2000 clamp.
 - **1.1.0** — `sync --offset` for chunked sync; typed `AUTH_REQUIRED` on the login redirect; README/help privacy scrub.
 
