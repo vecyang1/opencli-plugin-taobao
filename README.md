@@ -45,8 +45,10 @@ opencli taobao sessions --limit 20 -f table
 # 2. Extract full chat history with a seller (auto backward pagination)
 opencli taobao chat "某数码专营店" --limit 50 -f table
 
-# 3. Extract 10-year historical orders (bought items)
+# 3. Extract 10-year historical orders (supports arbitrary page jumping & deep traversal)
 opencli taobao orders --pages 3 -f table
+opencli taobao orders --page 5 --pages 2 -f table
+opencli taobao orders --all -f json
 
 # 4. Extract bought shops
 opencli taobao bought-shops --category "数码" -f table
