@@ -12,8 +12,9 @@ export const command = cli({
   navigateBefore: false,
   args: [
     { name: 'query', positional: true, required: true, help: '商品搜索关键词，例如: 背带裙、充电宝' },
-    { name: 'pages', type: 'int', default: 1, help: '抓取页数 (默认 1 页，每页约 44 件商品)' },
-    { name: 'limit', type: 'int', default: 44, help: '返回商品最大数量' },
+    { name: 'pages', type: 'int', required: false, help: '抓取页数 (默认按 limit 自动计算，每页约 44 件商品)' },
+    { name: 'limit', type: 'int', required: false, help: '返回商品最大数量 (默认 40)' },
+    { name: 'max-pages', type: 'int', required: false, help: '最大翻页上限 (默认 10，支持 1-20)' },
     { name: 'all', type: 'bool', default: false, help: '是否深度翻页抓取 (最多抓取 10 页)' },
     { name: 'sort', required: false, help: '排序规则: default (综合), sale-desc (销量高到低), price-asc (价格低到高), price-desc (价格高到低)' },
     { name: 'tab', required: false, help: '频道筛选: all (所有宝贝), mall (天猫)' },
@@ -35,19 +36,35 @@ export const command = cli({
     }
 
     const isAll = Boolean(kwargs.all);
-    let limit = isAll ? 500 : (kwargs.limit !== undefined && kwargs.limit !== null ? Number(kwargs.limit) : 44);
-    if (isNaN(limit) || limit <= 0) limit = 44;
+    const rawLimit = (kwargs.limit !== undefined && kwargs.limit !== null && kwargs.limit !== '') ? Number(kwargs.limit) : NaN;
+    const hasExplicitLimit = Number.isFinite(rawLimit) && rawLimit > 0;
 
-    const requestedPages = kwargs.pages !== undefined && kwargs.pages !== null ? Number(kwargs.pages) : 1;
-    const safeRequestedPages = isNaN(requestedPages) || requestedPages <= 0 ? 1 : requestedPages;
+    const rawPages = (kwargs.pages !== undefined && kwargs.pages !== null && kwargs.pages !== '') ? Number(kwargs.pages) : NaN;
+    const hasExplicitPages = Number.isFinite(rawPages) && rawPages > 0;
 
-    if (safeRequestedPages > 1 && limit <= 44) {
-      limit = safeRequestedPages * 44;
+    const rawMaxPages = (kwargs['max-pages'] !== undefined && kwargs['max-pages'] !== null && kwargs['max-pages'] !== '')
+      ? Number(kwargs['max-pages'])
+      : ((kwargs.maxPages !== undefined && kwargs.maxPages !== null && kwargs.maxPages !== '') ? Number(kwargs.maxPages) : NaN);
+    const hasExplicitMaxPages = Number.isFinite(rawMaxPages) && rawMaxPages > 0;
+    const maxPagesCap = hasExplicitMaxPages ? Math.max(1, Math.min(20, Math.floor(rawMaxPages))) : 10;
+
+    let limit;
+    let maxPages;
+
+    if (isAll) {
+      limit = Math.min(500, maxPagesCap * 50);
+      maxPages = maxPagesCap;
+    } else if (hasExplicitPages) {
+      const p = Math.max(1, Math.min(Math.floor(rawPages), maxPagesCap));
+      maxPages = p;
+      limit = hasExplicitLimit ? Math.max(1, Math.floor(rawLimit)) : p * 44;
+    } else if (hasExplicitLimit) {
+      limit = Math.max(1, Math.floor(rawLimit));
+      maxPages = maxPagesCap;
+    } else {
+      limit = 40;
+      maxPages = 1;
     }
-    limit = Math.min(limit, 500);
-
-    const minPagesNeeded = Math.ceil(limit / 44);
-    const maxPages = isAll ? 10 : Math.max(1, Math.min(Math.max(safeRequestedPages, minPagesNeeded), 10));
 
     let sortParam = '';
     if (kwargs.sort === 'sale-desc' || kwargs.sort === 'sales') {
@@ -65,57 +82,48 @@ export const command = cli({
 
     const searchUrl = 'https://s.taobao.com/search?q=' + encodeURIComponent(query) + sortParam + tabParam;
     await page.goto(searchUrl);
-    await page.wait(4);
-
-    const isAuth = await page.evaluate(`
-      (() => {
-        const href = window.location.href || '';
-        if (href.includes('login.taobao.com') || window.location.hostname.includes('login')) {
-          return false;
-        }
-        const text = document.body ? (document.body.innerText || '') : '';
-        if (text.includes('亲，请登录') || (text.includes('登录') && !text.includes('所有宝贝') && !text.includes('综合'))) {
-          return false;
-        }
-        return true;
-      })()
-    `);
-
-    if (!isAuth) {
-      throw new AuthRequiredError('淘宝搜索市场数据需要已登录的浏览器会话');
-    }
-
-    const isBlocked = await page.evaluate(`
-      (() => {
-        const text = document.body ? (document.body.innerText || '') : '';
-        const href = window.location.href || '';
-        if (href.includes('sec.taobao.com') || text.includes('按住滑块') || text.includes('RGV587') || document.querySelector('#nc_1_wrapper, .nc-container')) {
-          return true;
-        }
-        return false;
-      })()
-    `);
-
-    if (isBlocked) {
-      throw new Error('CAPTCHA_REQUIRED: 触发淘宝人机验证滑块，请在浏览器中滑动完成验证后重试');
-    }
+    await page.wait(3.5);
 
     const allItems = [];
     const seenIds = new Set();
 
     for (let p = 1; p <= maxPages; p++) {
+      const pageSecurityStatus = await page.evaluate(`
+        (() => {
+          const href = window.location.href || '';
+          if (href.includes('login.taobao.com') || window.location.hostname.includes('login')) {
+            return { error: 'AUTH_REQUIRED', message: '淘宝搜索市场数据需要已登录的浏览器会话' };
+          }
+          const text = document.body ? (document.body.innerText || '') : '';
+          if (text.includes('亲，请登录') || (text.includes('登录') && !text.includes('所有宝贝') && !text.includes('综合'))) {
+            return { error: 'AUTH_REQUIRED', message: '淘宝搜索市场数据需要已登录的浏览器会话' };
+          }
+          if (href.includes('sec.taobao.com') || text.includes('按住滑块') || text.includes('RGV587') || document.querySelector('#nc_1_wrapper, .nc-container')) {
+            return { error: 'CAPTCHA_REQUIRED', message: '触发淘宝人机验证滑块，请在浏览器中滑动完成验证后重试' };
+          }
+          return null;
+        })()
+      `);
+
+      if (pageSecurityStatus) {
+        if (pageSecurityStatus.error === 'AUTH_REQUIRED') {
+          throw new AuthRequiredError(pageSecurityStatus.message);
+        }
+        throw new Error('CAPTCHA_REQUIRED: ' + pageSecurityStatus.message);
+      }
+
       await page.evaluate(`
         (() => {
           window.scrollTo(0, document.body.scrollHeight / 2);
         })()
       `);
-      await page.wait(1.5);
+      await page.wait(1.2);
       await page.evaluate(`
         (() => {
           window.scrollTo(0, document.body.scrollHeight);
         })()
       `);
-      await page.wait(2);
+      await page.wait(1.5);
 
       const pageItems = await page.evaluate(`
         (() => {
@@ -212,18 +220,22 @@ export const command = cli({
         })()
       `);
 
+      const prevTotal = allItems.length;
       for (const item of pageItems) {
         if (!seenIds.has(item.item_id)) {
           seenIds.add(item.item_id);
           allItems.push(item);
         }
       }
+      const addedThisPage = allItems.length - prevTotal;
 
-      if (allItems.length >= limit || p >= maxPages || pageItems.length === 0) break;
+      if (allItems.length >= limit || p >= maxPages || pageItems.length === 0 || (p > 1 && addedThisPage === 0)) break;
 
       const hasNext = await page.evaluate(`
         (() => {
           const selectors = [
+            '.next-pagination-item.next-next button',
+            '.next-pagination-item.next-next a',
             '.next-pagination-item.next-next',
             'button.next-next',
             'button.next-btn',
@@ -232,8 +244,6 @@ export const command = cli({
             'button[aria-label="下一页"]',
             'button[aria-label="Next Page"]',
             '.ant-pagination-next button',
-            '.ant-pagination-next .ant-pagination-item-link',
-            '.next-pagination-item-link'
           ];
           let nextBtn = null;
           for (const s of selectors) {
@@ -248,7 +258,12 @@ export const command = cli({
             nextBtn = allBtns.find(el => el.innerText && (el.innerText.trim() === '下一页' || (el.innerText.trim().includes('下一页') && el.innerText.trim().length <= 6)));
           }
           if (nextBtn) {
-            const isDisabled = nextBtn.disabled || nextBtn.classList.contains('disabled') || (nextBtn.getAttribute('aria-disabled') === 'true') || (nextBtn.closest('.next-pagination-item') && nextBtn.closest('.next-pagination-item').classList.contains('disabled'));
+            const container = nextBtn.closest('.next-pagination-item, .ant-pagination-next') || nextBtn;
+            const isDisabled = nextBtn.disabled ||
+              nextBtn.classList.contains('disabled') ||
+              (nextBtn.getAttribute('aria-disabled') === 'true') ||
+              container.classList.contains('disabled') ||
+              (container.getAttribute('aria-disabled') === 'true');
             if (!isDisabled) {
               nextBtn.click();
               return true;
@@ -259,11 +274,34 @@ export const command = cli({
       `);
 
       if (hasNext) {
-        await page.wait(3);
+        let flipped = false;
+        const targetPage = p + 1;
+        for (let waitStep = 0; waitStep < 10; waitStep++) {
+          await page.wait(0.6);
+          const currentPageNum = await page.evaluate(`
+            (() => {
+              const cur = document.querySelector('.next-pagination-item.next-current, .ant-pagination-item-active');
+              if (cur && cur.innerText) {
+                const n = parseInt(cur.innerText.trim(), 10);
+                if (!isNaN(n)) return n;
+              }
+              return null;
+            })()
+          `);
+          if (currentPageNum === targetPage) {
+            flipped = true;
+            break;
+          }
+        }
+        if (!flipped) {
+          const nextPageUrl = searchUrl + (searchUrl.includes('?') ? '&' : '?') + 's=' + (p * 44) + '&page=' + (p + 1);
+          await page.goto(nextPageUrl);
+          await page.wait(2.5);
+        }
       } else {
         const nextPageUrl = searchUrl + (searchUrl.includes('?') ? '&' : '?') + 's=' + (p * 44) + '&page=' + (p + 1);
         await page.goto(nextPageUrl);
-        await page.wait(3);
+        await page.wait(2.5);
       }
     }
 
