@@ -12,9 +12,10 @@ export const command = cli({
   navigateBefore: false,
   args: [
     { name: 'query', positional: true, required: false, help: '按商品名称、店铺名或订单号搜索筛选' },
+    { name: 'page', type: 'int', default: 1, help: '从第几页开始拉取 (默认第 1 页, 支持跳转任意历史页)' },
     { name: 'pages', type: 'int', default: 1, help: '翻页抓取的总页数 (默认 1 页 = 30条, 设为 5 可拉取 150条)' },
     { name: 'limit', type: 'int', default: 50, help: '返回的最大订单数量' },
-    { name: 'all', type: 'bool', default: false, help: '是否全量翻页拉取全部历史订单 (最多翻 50 页)' },
+    { name: 'all', type: 'bool', default: false, help: '是否全量翻页拉取全部历史订单 (遍历至最后一页, 最多 200 页)' },
     { name: 'status', required: false, help: '按订单状态筛选 (如: 交易成功, 待发货, 待收货, 待付款)' },
   ],
   columns: [
@@ -30,50 +31,99 @@ export const command = cli({
     'order_id'
   ],
   func: async (page, kwargs) => {
-    const maxPages = kwargs.all ? 50 : (kwargs.pages || 1);
+    const startPage = kwargs.page || 1;
+    const maxPages = kwargs.all ? 200 : (kwargs.pages || 1);
     const query = (kwargs.query || '').trim().toLowerCase();
     const statusFilter = (kwargs.status || '').trim();
-    const limit = kwargs.all ? 2000 : (kwargs.limit || 50);
-    
+    const limit = kwargs.all ? 10000 : (kwargs.limit || 50);
+
     await page.goto('https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm');
-    await page.wait(4);
-    
+    await page.wait(3.5);
+
     const isAuth = await page.evaluate(`
       (() => {
         const text = document.body?.innerText || '';
         return text.includes('已买到的宝贝') || text.includes('所有订单');
       })()
     `);
-    
+
     if (!isAuth) {
       throw new AuthRequiredError('淘宝已买到的宝贝需要已登录的浏览器会话');
     }
-    
+
+    // Jump to startPage if requested
+    if (startPage > 1) {
+      const topIdBeforeJump = await page.evaluate(`
+        (() => {
+          const m = (document.body?.innerText || '').match(/订单号:\\s*(\\d+)/);
+          return m ? m[1] : '';
+        })()
+      `);
+
+      const jumped = await page.evaluate(`
+        ((target) => {
+          const item = document.querySelector('.ant-pagination-item[title="' + target + '"], .ant-pagination-item-' + target + ', li[title="' + target + '"]');
+          if (item) {
+            item.click();
+            return true;
+          }
+          const jumper = document.querySelector('.ant-pagination-options-quick-jumper input, .next-pagination-jump-input input');
+          if (jumper) {
+            jumper.focus();
+            jumper.value = target;
+            jumper.dispatchEvent(new Event('input', { bubbles: true }));
+            jumper.dispatchEvent(new Event('change', { bubbles: true }));
+            jumper.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+            jumper.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+            const goBtn = jumper.parentElement?.querySelector('button, .ant-pagination-options-quick-jumper-button');
+            if (goBtn) goBtn.click();
+            return true;
+          }
+          return false;
+        })(${startPage})
+      `);
+
+      if (jumped) {
+        let waitJump = 0;
+        while (waitJump < 3000) {
+          await page.wait(0.2);
+          waitJump += 200;
+          const topIdAfter = await page.evaluate(`
+            (() => {
+              const m = (document.body?.innerText || '').match(/订单号:\\s*(\\d+)/);
+              return m ? m[1] : '';
+            })()
+          `);
+          if (topIdAfter && topIdAfter !== topIdBeforeJump) break;
+        }
+      }
+    }
+
     const allOrders = [];
-    
+
     for (let p = 1; p <= maxPages; p++) {
       const pageOrders = await page.evaluate(`
         (() => {
           const text = document.body?.innerText || '';
           const parts = text.split(/(?=\\d{4}-\\d{2}-\\d{2}\\s*\\n\\s*订单号:)/);
-          
+
           const parsedOrders = [];
           for (const p of parts) {
             const lines = p.split('\\n').map(s => s.trim()).filter(Boolean);
             const orderMatch = p.match(/订单号:\\s*(\\d+)/);
             const dateMatch = p.match(/(\\d{4}-\\d{2}-\\d{2})/);
             if (!orderMatch) continue;
-            
+
             const orderId = orderMatch[1];
             const orderDate = dateMatch ? dateMatch[1] : '';
-            
+
             // Shop name
             let shopName = '';
             const orderIdx = lines.findIndex(l => l.includes('订单号:'));
             if (orderIdx >= 0 && lines[orderIdx + 1] && !lines[orderIdx + 1].includes('订单详情')) {
               shopName = lines[orderIdx + 1];
             }
-            
+
             // Status
             let status = '交易成功';
             if (p.includes('退款成功') || p.includes('交易关闭')) status = '交易关闭/已退款';
@@ -83,7 +133,7 @@ export const command = cli({
             else if (p.includes('待付款')) status = '待付款';
             else if (p.includes('待收货')) status = '待收货';
             else if (p.includes('交易成功')) status = '交易成功';
-            
+
             // Payment method
             let paymentMethod = '其他/未注明';
             if (p.includes('该订单使用信用卡支付') || p.includes('信用卡支付')) {
@@ -97,14 +147,14 @@ export const command = cli({
             } else if (p.includes('手机订单')) {
               paymentMethod = '手机支付(支付宝/免密)';
             }
-            
+
             // Total paid
             let total = '';
             const totalMatch = p.match(/实付款\\s*[¥￥]\\s*([\\d.]+)/);
             if (totalMatch) {
               total = totalMatch[1];
             }
-            
+
             // Title & Spec
             let title = '';
             let spec = '';
@@ -130,15 +180,15 @@ export const command = cli({
                 }
               }
             }
-            
+
             // Quantity & Price
             let quantity = 1;
             const qtyMatch = p.match(/x(\\d+)/);
             if (qtyMatch) quantity = parseInt(qtyMatch[1], 10);
-            
+
             const priceMatches = Array.from(p.matchAll(/[¥￥]([\\d.]+)/g)).map(m => m[1]);
             let price = priceMatches.length > 0 ? priceMatches[0] : (total || '0');
-            
+
             parsedOrders.push({
               order_id: orderId,
               order_date: orderDate,
@@ -152,50 +202,69 @@ export const command = cli({
               payment_method: paymentMethod
             });
           }
-          
+
           return parsedOrders;
         })()
       `);
-      
+
       for (const ord of pageOrders) {
         if (!allOrders.some(existing => existing.order_id === ord.order_id)) {
           allOrders.push(ord);
         }
       }
-      
+
       if (allOrders.length >= limit || p >= maxPages) break;
-      
+
       // Attempt click next page
-      const hasNext = await page.evaluate(`
+      const paginationInfo = await page.evaluate(`
         (() => {
-          const nextBtn = document.querySelector('.ant-pagination-next button, .ant-pagination-next .ant-pagination-item-link, .next-pagination-item-link');
-          const isDisabled = document.querySelector('.ant-pagination-next')?.classList.contains('ant-pagination-disabled');
+          const nextBtn = document.querySelector('.ant-pagination-next button, .ant-pagination-next .ant-pagination-item-link, .next-pagination-item-link, .pagination-next');
+          const nextContainer = document.querySelector('.ant-pagination-next, .next-pagination-next');
+          const isDisabled = nextContainer ? (nextContainer.classList.contains('ant-pagination-disabled') || nextContainer.classList.contains('next-disabled')) : true;
+
+          let clicked = false;
           if (nextBtn && !isDisabled) {
             nextBtn.click();
-            return true;
+            clicked = true;
           }
-          return false;
+          return { clicked, isDisabled };
         })()
       `);
-      
-      if (!hasNext) break;
-      await page.wait(3);
+
+      if (!paginationInfo.clicked) break;
+
+      // Smart wait: poll until the top order ID changes, or up to 3 seconds
+      const prevTopId = pageOrders[0]?.order_id;
+      let waited = 0;
+      while (waited < 3000) {
+        await page.wait(0.2);
+        waited += 200;
+        const newTopId = await page.evaluate(`
+          (() => {
+            const m = (document.body?.innerText || '').match(/订单号:\\s*(\\d+)/);
+            return m ? m[1] : '';
+          })()
+        `);
+        if (newTopId && newTopId !== prevTopId) {
+          break;
+        }
+      }
     }
-    
+
     let filtered = allOrders;
     if (query) {
-      filtered = filtered.filter(o => 
-        o.title.toLowerCase().includes(query) || 
-        o.shop.toLowerCase().includes(query) || 
+      filtered = filtered.filter(o =>
+        o.title.toLowerCase().includes(query) ||
+        o.shop.toLowerCase().includes(query) ||
         o.order_id.includes(query) ||
         o.spec.toLowerCase().includes(query)
       );
     }
-    
+
     if (statusFilter) {
       filtered = filtered.filter(o => o.status.includes(statusFilter));
     }
-    
+
     return filtered.slice(0, limit);
   }
 });

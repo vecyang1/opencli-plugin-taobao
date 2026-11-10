@@ -163,11 +163,12 @@ export const command = cli({
               const shopLine = lines.find(l => l.includes('旗舰店') || l.includes('专营店') || l.includes('企业店') || l.includes('达人店') || l.includes('老店') || l.includes('店'));
               if (shopLine) shop = shopLine;
             }
+            shop = shop.replace(/^买过的店\\s*/, '').replace(/[\\r\\n]+/g, ' ').trim();
 
             let location = '';
-            const locMatch = cardText.match(/(北京|上海|天津|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|海南|四川|贵州|云南|陕西|甘肃|青海|台湾|内蒙古|广西|西藏|宁夏|新疆|香港|澳门)(?:\\s+[\\u4e00-\\u9fa5]+)?/);
+            const locMatch = cardText.match(/(北京|上海|天津|重庆|河北|山西|辽宁|吉林|黑龙江|江苏|浙江|安徽|福建|江西|山东|河南|湖北|湖南|广东|海南|四川|贵州|云南|陕西|甘肃|青海|台湾|内蒙古|广西|西藏|宁夏|新疆|香港|澳门)(?:[ \\t]+[\\u4e00-\\u9fa5]+)?/);
             if (locMatch) {
-              location = locMatch[0];
+              location = locMatch[0].replace(/[\\r\\n]+/g, ' ').replace(/\\s*(包邮|官方立减|退货宝|双11|公益宝贝).*/g, '').trim();
             }
 
             const badges = [];
