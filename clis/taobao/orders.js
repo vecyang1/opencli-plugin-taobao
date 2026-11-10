@@ -23,7 +23,10 @@ export const command = cli({
     'status',
     'title',
     'spec',
+    'price',
+    'quantity',
     'total_paid',
+    'payment_method',
     'order_id'
   ],
   func: async (page, kwargs) => {
@@ -64,47 +67,89 @@ export const command = cli({
             const orderId = orderMatch[1];
             const orderDate = dateMatch ? dateMatch[1] : '';
             
+            // Shop name
             let shopName = '';
-            let status = '交易成功';
-            let title = '';
-            let spec = '';
-            let price = '';
-            let total = '';
-            
             const orderIdx = lines.findIndex(l => l.includes('订单号:'));
-            if (orderIdx >= 0 && lines[orderIdx + 1]) {
+            if (orderIdx >= 0 && lines[orderIdx + 1] && !lines[orderIdx + 1].includes('订单详情')) {
               shopName = lines[orderIdx + 1];
             }
             
-            if (p.includes('交易成功')) status = '交易成功';
-            else if (p.includes('待付款')) status = '待付款';
+            // Status
+            let status = '交易成功';
+            if (p.includes('退款成功') || p.includes('交易关闭')) status = '交易关闭/已退款';
+            else if (p.includes('买家已付款')) status = '买家已付款';
             else if (p.includes('待发货')) status = '待发货';
+            else if (p.includes('卖家已发货')) status = '卖家已发货';
+            else if (p.includes('待付款')) status = '待付款';
             else if (p.includes('待收货')) status = '待收货';
-            else if (p.includes('交易关闭')) status = '交易关闭';
+            else if (p.includes('交易成功')) status = '交易成功';
             
+            // Payment method
+            let paymentMethod = '其他/未注明';
+            if (p.includes('该订单使用信用卡支付') || p.includes('信用卡支付')) {
+              paymentMethod = '信用卡支付';
+            } else if (p.includes('支付宝') || p.includes('Alipay')) {
+              paymentMethod = '支付宝';
+            } else if (p.includes('微信支付') || p.includes('WeChat')) {
+              paymentMethod = '微信支付';
+            } else if (p.includes('花呗')) {
+              paymentMethod = '花呗';
+            } else if (p.includes('手机订单')) {
+              paymentMethod = '手机支付(支付宝/免密)';
+            }
+            
+            // Total paid
+            let total = '';
             const totalMatch = p.match(/实付款\\s*[¥￥]\\s*([\\d.]+)/);
-            if (totalMatch) total = '￥' + totalMatch[1];
+            if (totalMatch) {
+              total = totalMatch[1];
+            }
             
-            const statusIdx = lines.findIndex(l => l.includes('交易成功') || l.includes('交易关闭') || l.includes('待发货') || l.includes('待收货') || l.includes('待付款'));
-            if (statusIdx >= 0 && lines[statusIdx + 1]) {
-              title = lines[statusIdx + 1].replace(/\\[交易快照\\]/g, '').trim();
-              if (lines[statusIdx + 2] && !lines[statusIdx + 2].match(/^(不支持|申请售后|￥|¥|x\\d|实付款)/)) {
-                spec = lines[statusIdx + 2];
+            // Title & Spec
+            let title = '';
+            let spec = '';
+            let detailIdx = lines.findIndex(l => l === '订单详情');
+            if (detailIdx >= 0) {
+              let cur = detailIdx + 1;
+              while (cur < lines.length && (
+                lines[cur] === '买家已付款' ||
+                lines[cur] === '交易成功' ||
+                lines[cur] === '交易关闭' ||
+                lines[cur] === '卖家已发货' ||
+                lines[cur] === '采购订单' ||
+                lines[cur].startsWith('待发货') ||
+                lines[cur].startsWith('待收货')
+              )) {
+                cur++;
+              }
+              if (cur < lines.length) {
+                title = lines[cur].replace(/\\[交易快照\\]/g, '').trim();
+                cur++;
+                if (cur < lines.length && !lines[cur].match(/^(不支持|申请售后|退货宝|极速退款|退款|加入购物车|[¥￥]|x\\d|实付款|待发货)/)) {
+                  spec = lines[cur].replace(/\\[交易快照\\]/g, '').trim();
+                }
               }
             }
             
-            const priceMatch = p.match(/[¥￥]([\\d.]+)\\s*\\nx\\d+/);
-            if (priceMatch) price = '￥' + priceMatch[1];
+            // Quantity & Price
+            let quantity = 1;
+            const qtyMatch = p.match(/x(\\d+)/);
+            if (qtyMatch) quantity = parseInt(qtyMatch[1], 10);
+            
+            const priceMatches = Array.from(p.matchAll(/[¥￥]([\\d.]+)/g)).map(m => m[1]);
+            let price = priceMatches.length > 0 ? priceMatches[0] : (total || '0');
             
             parsedOrders.push({
               order_id: orderId,
               order_date: orderDate,
               shop: shopName,
               status: status,
-              title: title.slice(0, 120),
-              spec: spec.slice(0, 120),
-              price: price || total || '￥0',
-              total_paid: total || price || '￥0'
+              title: title.slice(0, 150),
+              spec: spec.slice(0, 150),
+              price: '￥' + price,
+              quantity: quantity,
+              total_paid: total ? '￥' + total : ('￥' + price),
+              payment_method: paymentMethod
             });
           }
           
