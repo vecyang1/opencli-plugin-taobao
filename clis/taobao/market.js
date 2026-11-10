@@ -34,8 +34,20 @@ export const command = cli({
       throw new Error('请提供搜索关键词');
     }
 
-    const maxPages = kwargs.all ? 10 : Math.max(1, Math.min(kwargs.pages || 1, 10));
-    const limit = kwargs.all ? 500 : Math.max(1, Math.min(kwargs.limit || 44, 500));
+    const isAll = Boolean(kwargs.all);
+    let limit = isAll ? 500 : (kwargs.limit !== undefined && kwargs.limit !== null ? Number(kwargs.limit) : 44);
+    if (isNaN(limit) || limit <= 0) limit = 44;
+
+    const requestedPages = kwargs.pages !== undefined && kwargs.pages !== null ? Number(kwargs.pages) : 1;
+    const safeRequestedPages = isNaN(requestedPages) || requestedPages <= 0 ? 1 : requestedPages;
+
+    if (safeRequestedPages > 1 && limit <= 44) {
+      limit = safeRequestedPages * 44;
+    }
+    limit = Math.min(limit, 500);
+
+    const minPagesNeeded = Math.ceil(limit / 44);
+    const maxPages = isAll ? 10 : Math.max(1, Math.min(Math.max(safeRequestedPages, minPagesNeeded), 10));
 
     let sortParam = '';
     if (kwargs.sort === 'sale-desc' || kwargs.sort === 'sales') {
