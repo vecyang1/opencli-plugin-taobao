@@ -47,7 +47,9 @@ export const command = cli({
       ? Number(kwargs['max-pages'])
       : ((kwargs.maxPages !== undefined && kwargs.maxPages !== null && kwargs.maxPages !== '') ? Number(kwargs.maxPages) : NaN);
     const hasExplicitMaxPages = Number.isFinite(rawMaxPages) && rawMaxPages > 0;
-    const maxPagesCap = hasExplicitMaxPages ? Math.max(1, Math.min(20, Math.floor(rawMaxPages))) : 10;
+    const maxPagesCap = hasExplicitMaxPages
+      ? Math.max(1, Math.min(20, Math.floor(rawMaxPages)))
+      : Math.min(20, Math.max(10, hasExplicitLimit ? Math.ceil(rawLimit / 25) : 10));
 
     let limit;
     let maxPages;
@@ -87,6 +89,7 @@ export const command = cli({
 
     const allItems = [];
     const seenIds = new Set();
+    let consecutiveZeroNewPages = 0;
 
     for (let p = 1; p <= maxPages; p++) {
       const pageSecurityStatus = await page.evaluate(`
@@ -113,23 +116,19 @@ export const command = cli({
         throw new Error('CAPTCHA_REQUIRED: ' + pageSecurityStatus.message);
       }
 
-      await page.evaluate(`
-        (() => {
-          window.scrollTo(0, document.body.scrollHeight / 2);
-        })()
-      `);
-      await page.wait(1.2);
-      await page.evaluate(`
-        (() => {
-          window.scrollTo(0, document.body.scrollHeight);
-        })()
-      `);
-      await page.wait(1.5);
+      for (const ratio of [0.25, 0.5, 0.75, 1.0]) {
+        await page.evaluate(`
+          (() => {
+            window.scrollTo(0, Math.floor(document.body.scrollHeight * ${ratio}));
+          })()
+        `);
+        await page.wait(0.55);
+      }
 
       const pageItems = await page.evaluate(`
         (() => {
           const results = [];
-          const links = Array.from(document.querySelectorAll('a[href*="item.taobao.com/item.htm"], a[href*="detail.tmall.com/item.htm"], a[href*="chaoshi.detail.tmall.com/item.htm"]'));
+          const links = Array.from(document.querySelectorAll('a[href*="item.taobao.com/item.htm"], a[href*="detail.tmall.com/item.htm"], a[href*="detail.tmall.hk/"], a[href*="chaoshi.detail.tmall.com/item.htm"], a[href*="yao.95095.com/"]'));
 
           for (const a of links) {
             const href = a.getAttribute('href') || '';
@@ -244,8 +243,10 @@ export const command = cli({
         }
       }
       const addedThisPage = allItems.length - prevTotal;
+      if (p > 1 && addedThisPage === 0) consecutiveZeroNewPages += 1;
+      else consecutiveZeroNewPages = 0;
 
-      if (allItems.length >= limit || p >= maxPages || pageItems.length === 0 || (p > 1 && addedThisPage === 0)) break;
+      if (allItems.length >= limit || p >= maxPages || pageItems.length === 0 || consecutiveZeroNewPages >= 2) break;
 
       const hasNext = await page.evaluate(`
         (() => {
