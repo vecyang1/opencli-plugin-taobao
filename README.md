@@ -106,6 +106,13 @@ Each command injects a browser script as a template literal passed to ``page.eva
 - **1.1.1** — fix: the `sync`/`chat` injected scripts failed to parse (`senderNick` declared twice) since 1.1.0's sanitize commit; empty custom payloads no longer render as `{}`; `sync --msg-limit` help states its 20–2000 clamp.
 - **1.1.0** — `sync --offset` for chunked sync; typed `AUTH_REQUIRED` on the login redirect; README/help privacy scrub.
 
+## Agent 接入与分布式共建
+
+Agent接入后可自行推理, 也可以完善和提交回改进。
+
+- **自主推理与执行**：Agent 接入本仓库后，可通过 `--help`、结构化输出或内置诊断命令自行推理调用链路与参数契约，无需人工逐步拆解。
+- **分布式改进与回馈**：当在实际使用中由 Agent 扩展了新适配器、修复了边界问题或优化了工作流，欢迎直接让 Agent 运行测试套件并通过 `gh pr create` 提交改进，共同演进本仓库。
+
 ## 📄 License
 
 This project is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0-or-later)](./LICENSE).
