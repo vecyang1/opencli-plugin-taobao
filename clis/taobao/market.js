@@ -28,6 +28,7 @@ export const command = cli({
     'location',
     'badges',
     'url',
+    'image_url',
   ],
   func: async (page, kwargs) => {
     const query = String(kwargs.query || '').trim();
@@ -204,6 +205,20 @@ export const command = cli({
             if (detailUrl.startsWith('//')) detailUrl = 'https:' + detailUrl;
             else if (!detailUrl.startsWith('http')) detailUrl = 'https://item.taobao.com/item.htm?id=' + itemId;
 
+            let imageUrl = '';
+            const imgEl = card ? card.querySelector('img[src*="alicdn"], img[src*="taobaocdn"], img[data-src*="alicdn"], img[class*="mainPic"], img[class*="pic"], img') : null;
+            if (imgEl) {
+              let src = imgEl.getAttribute('data-src') || imgEl.getAttribute('data-ks-lazyload') || imgEl.getAttribute('data-lazyload-src') || imgEl.getAttribute('src') || '';
+              if (src.startsWith('data:image') || src.includes('clear.png') || src.includes('blank.gif')) {
+                src = imgEl.getAttribute('data-src') || imgEl.getAttribute('data-ks-lazyload') || imgEl.getAttribute('data-lazyload-src') || '';
+              }
+              if (src) {
+                let cleanSrc = src.startsWith('//') ? 'https:' + src : src;
+                cleanSrc = cleanSrc.replace(/(\\.(?:jpe?g|png|gif))_.+$/i, '$1');
+                imageUrl = cleanSrc;
+              }
+            }
+
             results.push({
               item_id: itemId,
               title: title.slice(0, 150),
@@ -213,6 +228,7 @@ export const command = cli({
               location: location,
               badges: badges.join(' | '),
               url: detailUrl,
+              image_url: imageUrl,
             });
           }
 
