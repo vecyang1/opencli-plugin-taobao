@@ -62,13 +62,23 @@ opencli taobao cart -f table
 # 7. AI Semantic Reasoning on seller commitments & dispute evidence
 opencli taobao reason "某官方旗舰店" -f yaml
 
-# 8. Market research across active listings
-opencli taobao market "小个子秋装连衣裙" --pages 2 -f table
+# 8. Market research across active listings (with price range filter)
+opencli taobao market "小个子秋装连衣裙" --pages 2 --min-price 50 --max-price 300 -f table
 
-# 9. Export chat history to Markdown / HTML
+# 9. Shop detail & full in-shop product listing
+opencli taobao shop "anker" --sort sales --pages 2 --limit 24 -f table
+
+# 10. Product Q&A ("问大家"), visual image search, similar items, suggestions & short-link resolver
+opencli taobao questions 818133532091 --limit 20 -f table
+opencli taobao image-search ./sample.jpg --limit 20 -f table
+opencli taobao similar 818133532091 --limit 20 -f table
+opencli taobao suggest "折叠椅" --limit 10 -f json
+opencli taobao resolve-link "https://m.tb.cn/h.gX12345" -f json
+
+# 11. Export chat history to Markdown / HTML
 opencli taobao export "某品牌专卖店" --format html --output ./chat.html
 
-# 10. High-speed batch sync
+# 12. High-speed batch sync
 opencli taobao sync --limit 30 -f json
 # Chunked / resumable sync: skip the first N conversations (added in 1.1.0).
 # Without --offset every call re-syncs the top N; chunked callers must advance it.
