@@ -18,6 +18,8 @@ export const command = cli({
     { name: 'all', type: 'bool', default: false, help: '是否深度翻页抓取 (最多抓取 10 页)' },
     { name: 'sort', required: false, help: '排序规则: default (综合), sale-desc (销量高到低), price-asc (价格低到高), price-desc (价格高到低)' },
     { name: 'tab', required: false, help: '频道筛选: all (所有宝贝), mall (天猫)' },
+    { name: 'min-price', type: 'float', required: false, help: '最低价格筛选 (元)' },
+    { name: 'max-price', type: 'float', required: false, help: '最高价格筛选 (元)' },
   ],
   columns: [
     'item_id',
@@ -83,7 +85,17 @@ export const command = cli({
       tabParam = '&tab=mall';
     }
 
-    const searchUrl = 'https://s.taobao.com/search?q=' + encodeURIComponent(query) + sortParam + tabParam;
+    const minPriceRaw = kwargs['min-price'] ?? kwargs.minPrice;
+    const maxPriceRaw = kwargs['max-price'] ?? kwargs.maxPrice;
+    const minPrice = (minPriceRaw !== undefined && minPriceRaw !== null && minPriceRaw !== '' && Number.isFinite(Number(minPriceRaw))) ? Number(minPriceRaw) : null;
+    const maxPrice = (maxPriceRaw !== undefined && maxPriceRaw !== null && maxPriceRaw !== '' && Number.isFinite(Number(maxPriceRaw))) ? Number(maxPriceRaw) : null;
+
+    let priceParam = '';
+    if (minPrice !== null || maxPrice !== null) {
+      priceParam = '&filter=reserve_price%5B' + (minPrice !== null ? minPrice : '') + '%2C' + (maxPrice !== null ? maxPrice : '') + '%5D';
+    }
+
+    const searchUrl = 'https://s.taobao.com/search?q=' + encodeURIComponent(query) + sortParam + tabParam + priceParam;
     await page.goto(searchUrl);
     await page.wait(3.5);
 

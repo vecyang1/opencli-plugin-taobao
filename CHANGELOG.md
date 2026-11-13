@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-13
+
+### Features
+- **OneBound & JustOneAPI 淘宝轮子全量对标补齐**：
+  - `market.js` 新增 `--min-price` 与 `--max-price` 价格区间筛选参数。
+  - 新增 `shop.js`：淘宝/天猫店铺档案与全店商品多页抓取（支持销量/上新/价格排序及店内搜索）。
+  - 新增 `questions.js`：商品「问大家」买家真实问答提取。
+  - 新增 `image-search.js`：淘宝拍立淘以图搜同款。
+  - 新增 `similar.js`：同款、相似款与看了又看推荐提取。
+  - 新增 `suggest.js`：零登录极速搜索下拉联想词推荐。
+  - 新增 `resolve-link.js`：淘宝/天猫/1688 分享短链（`m.tb.cn`）规范链接与商品 ID 解析。
+  - 新增 `tests/adapter_scripts.test.js`：全量 16 个适配器语法、`cli()` 契约与注入脚本编译校验。
+
+## [2026-11-13] - 2026-11-13
+
+### Features
+- Add safe visual detail extractor, SKU unmasking, and review photo inspection (`2ddc8b7`)
+
+### Fixes
+- Progressive 4-step scroll, tmall.hk selector, adaptive max-pages and 2-page zero-yield guard (`69d0323`)
+- Smart pagination polling, dynamic ceiling and ad attrition compensation (`43bf0fe`)
+- Dynamic multi-page calculation from limit and auto-expanded limit from pages (`7e3eb8b`)
+
+### Maintenance
+- Auto-sanitize privacy files and local paths (`cab6834`)
+
 ## [1.3.2] - 2026-11-10
 
 ### Added
