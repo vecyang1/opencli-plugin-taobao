@@ -38,14 +38,30 @@ export const command = cli({
     const limit = kwargs.all ? 10000 : (kwargs.limit || 50);
 
     await page.goto('https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm');
-    await page.wait(3.5);
 
-    const isAuth = await page.evaluate(`
-      (() => {
-        const text = document.body?.innerText || '';
-        return text.includes('已买到的宝贝') || text.includes('所有订单');
-      })()
-    `);
+    // Poll for SPA hydration & SSO bounce completion (up to 12s) instead of rigid 3.5s sleep
+    let isAuth = false;
+    const authPollStart = Date.now();
+    await page.wait(1.0);
+    while (Date.now() - authPollStart < 12000) {
+      const probe = await page.evaluate(`
+        (() => {
+          const href = window.location.href || '';
+          const text = document.body?.innerText || '';
+          const hasMarker = text.includes('已买到的宝贝') || text.includes('所有订单') || /订单号:\\s*\\d+/.test(text);
+          const isLogin = href.includes('login.taobao.com') || href.includes('passport.taobao.com');
+          return { hasMarker, isLogin };
+        })()
+      `);
+      if (probe && probe.hasMarker) {
+        isAuth = true;
+        break;
+      }
+      if (probe && probe.isLogin && Date.now() - authPollStart >= 3000) {
+        break;
+      }
+      await page.wait(0.5);
+    }
 
     if (!isAuth) {
       throw new AuthRequiredError('淘宝已买到的宝贝需要已登录的浏览器会话');

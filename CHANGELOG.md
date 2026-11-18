@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026-11-19] - 2026-11-19
+
+### Fixed
+- `orders.js`: Synced runtime SPA hydration & SSO bounce 12s polling fix from `~/.opencli/clis/taobao/orders.js` back into SSOT repo (replaces rigid 3.5s wait).
+
+### Hardened
+- `tests/adapter_scripts.test.js`: Added byte-for-byte SHA-256 drift gate between `clis/taobao/*.js` and `~/.opencli/clis/taobao/*.js` when the runtime directory exists.
+
+## [2026-11-16] - 2026-11-16
+
+### Documentation
+- Document new Taobao parity commands (`a7a2405`)
+
 ## [1.4.0] - 2026-11-13
 
 ### Features

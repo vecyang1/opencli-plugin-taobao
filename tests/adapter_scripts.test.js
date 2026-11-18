@@ -1,6 +1,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vm from 'node:vm';
 import { execFileSync } from 'node:child_process';
@@ -9,6 +11,12 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ADAPTERS_DIR = path.resolve(__dirname, '../clis/taobao');
+const INSTALLED_DIR = process.env.TAOBAO_ADAPTER_DEST || path.join(os.homedir(), '.opencli/clis/taobao');
+
+function fileHash(fp) {
+  if (!fs.existsSync(fp)) return null;
+  return crypto.createHash('sha256').update(fs.readFileSync(fp)).digest('hex');
+}
 
 describe('opencli-plugin-taobao Adapter Contracts & Injected Script Syntax', () => {
   const files = fs.readdirSync(ADAPTERS_DIR).filter((f) => f.endsWith('.js') && !f.endsWith('.test.js'));
@@ -51,6 +59,22 @@ describe('opencli-plugin-taobao Adapter Contracts & Injected Script Syntax', () 
       while ((m = staticEvalRegex.exec(code)) !== null) {
         assert.doesNotThrow(() => new vm.Script(m[1]), `Syntax error in static page.evaluate inside ${file}`);
       }
+    }
+  });
+
+  test('installed runtime adapters match source byte-for-byte when ~/.opencli/clis/taobao exists', (t) => {
+    if (!fs.existsSync(INSTALLED_DIR)) {
+      t.skip(`Runtime adapter dir absent (CI/clean env): ${INSTALLED_DIR}`);
+      return;
+    }
+    for (const file of files) {
+      const srcHash = fileHash(path.join(ADAPTERS_DIR, file));
+      const destHash = fileHash(path.join(INSTALLED_DIR, file));
+      assert.equal(
+        destHash,
+        srcHash,
+        `Taobao adapter drift detected in ${file}! Reconcile clis/taobao/${file} and ${INSTALLED_DIR}/${file}`
+      );
     }
   });
 });
