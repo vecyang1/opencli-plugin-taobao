@@ -42,17 +42,136 @@ function detectTaobaoPageState() {
   return 'ok';
 }
 
+const CANONICAL_TAOBAO_HOSTS = new Set([
+  'item.taobao.com',
+  'detail.tmall.com',
+  'detail.tmall.hk',
+  'chaoshi.detail.tmall.com',
+]);
+
+function isValidSkuId(skuId) {
+  return /^\d{6,20}$/.test(String(skuId ?? '').trim());
+}
+
+function extractSkuIdFromUrl(rawUrl) {
+  if (!rawUrl || !/^https?:\/\//i.test(String(rawUrl).trim())) return null;
+  try {
+    const u = new URL(String(rawUrl).trim());
+    const val = u.searchParams.get('skuId') || u.searchParams.get('skuid') || '';
+    return isValidSkuId(val) ? val.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveCanonicalBaseUrl(itemId, ...candidateUrls) {
+  let host = 'item.taobao.com';
+  for (const raw of candidateUrls) {
+    if (!raw || !/^https?:\/\//i.test(String(raw).trim())) continue;
+    try {
+      const h = new URL(String(raw).trim()).hostname.toLowerCase();
+      if (CANONICAL_TAOBAO_HOSTS.has(h)) {
+        host = h;
+        break;
+      }
+    } catch {
+      // ignore invalid URL candidates
+    }
+  }
+  return `https://${host}/item.htm?id=${encodeURIComponent(String(itemId))}`;
+}
+
+function buildTaobaoSkuUrl(baseUrl, skuId) {
+  if (!isValidSkuId(skuId)) return baseUrl;
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${sep}skuId=${encodeURIComponent(String(skuId).trim())}`;
+}
+
+function pickDefaultSkuId(variants, { basePrice = 0, requestedSkuId = null, pageSkuId = null } = {}) {
+  const realVariants = variants.filter((v) => v._realSkuId && isValidSkuId(v.sku_id));
+  if (isValidSkuId(requestedSkuId)) return String(requestedSkuId).trim();
+  if (isValidSkuId(pageSkuId)) {
+    const pSku = String(pageSkuId).trim();
+    if (realVariants.length === 0 || realVariants.some((v) => v.sku_id === pSku)) {
+      return pSku;
+    }
+  }
+  if (realVariants.length === 0) return null;
+
+  const inStockCore = realVariants.filter((v) => !v.disabled && !v.is_accessory);
+  const priceMatch = basePrice > 0
+    ? inStockCore.find((v) => Number(v.price) > 0 && Math.abs(Number(v.price) - Number(basePrice)) < 0.01)
+    : null;
+  if (priceMatch) return priceMatch.sku_id;
+
+  const pricedCore = inStockCore
+    .filter((v) => Number(v.price) > 0)
+    .sort((a, b) => Number(a.price) - Number(b.price));
+  if (pricedCore.length > 0) return pricedCore[0].sku_id;
+  if (inStockCore.length > 0) return inStockCore[0].sku_id;
+
+  const inStockAny = realVariants.find((v) => !v.disabled);
+  return inStockAny ? inStockAny.sku_id : realVariants[0].sku_id;
+}
+
+function enrichDetailWithSkuUrls(detailData, { itemId, requestedUrl = '', requestedSkuId = null } = {}) {
+  if (!detailData || typeof detailData !== 'object') return detailData;
+  const resolvedItemId = String(itemId || detailData.item_id || '').trim();
+  const baseUrl = resolveCanonicalBaseUrl(
+    resolvedItemId,
+    detailData.page_url,
+    detailData.base_url,
+    detailData.url,
+    requestedUrl
+  );
+  const rawVariants = Array.isArray(detailData.sku_variants) ? detailData.sku_variants : [];
+  const taggedVariants = rawVariants.map((variant) => {
+    const skuStr = variant?.sku_id != null ? String(variant.sku_id).trim() : '';
+    const isReal = variant?.has_real_sku_id !== false && isValidSkuId(skuStr);
+    return { ...variant, sku_id: skuStr || variant?.sku_id, _realSkuId: isReal };
+  });
+
+  const explicitSku = isValidSkuId(requestedSkuId)
+    ? String(requestedSkuId).trim()
+    : extractSkuIdFromUrl(requestedUrl);
+  const pageSku = extractSkuIdFromUrl(detailData.page_url);
+  const selectedSkuId = pickDefaultSkuId(taggedVariants, {
+    basePrice: Number(detailData.price) || 0,
+    requestedSkuId: explicitSku,
+    pageSkuId: pageSku,
+  });
+
+  const skuVariants = taggedVariants.map((variant) => {
+    const { has_real_sku_id: _h, _realSkuId, ...clean } = variant;
+    return {
+      ...clean,
+      url: _realSkuId ? buildTaobaoSkuUrl(baseUrl, clean.sku_id) : baseUrl,
+    };
+  });
+
+  const { page_url: _pageUrl, ...rest } = detailData;
+  return {
+    ...rest,
+    item_id: resolvedItemId,
+    base_url: baseUrl,
+    selected_sku_id: selectedSkuId,
+    url: buildTaobaoSkuUrl(baseUrl, selectedSkuId),
+    sku_variants: skuVariants,
+  };
+}
+
 export const command = cli({
   site: 'taobao',
   name: 'detail',
   access: 'read',
-  description: '获取淘宝商品详情 (程序化提取落地页图片、SKU变体矩阵、真实到手价、参数规格、详情长图与评价晒单)',
+  description: '获取淘宝商品详情 (程序化提取落地页图片、SKU变体矩阵与直达SKU链接、真实到手价、参数规格、详情长图与评价晒单)',
   domain: 'item.taobao.com',
   strategy: Strategy.COOKIE,
   browser: true,
   navigateBefore: false,
   args: [
-    { name: 'id', positional: true, required: true, help: '商品 ID 或淘宝/天猫商品链接，例如: 818133532091' },
+    { name: 'id', positional: true, required: true, help: '商品 ID 或淘宝/天猫商品链接（支持带 skuId=），例如: 818133532091' },
+    { name: 'sku', type: 'str', help: '指定优先选中的 SKU ID（不传时默认定位到主商品在售 SKU 并在 url 中带上 skuId）' },
     { name: 'reviews', type: 'bool', default: false, help: '是否抓取买家评价与实拍晒图' },
     { name: 'desc', type: 'bool', default: false, help: '是否抓取详情页图文长图与规格参数' },
   ],
@@ -66,6 +185,7 @@ export const command = cli({
     'location',
     'sales',
     'sku_count',
+    'selected_sku_id',
     'images_count',
     'url',
   ],
@@ -76,6 +196,7 @@ export const command = cli({
       throw new Error('无效的商品 ID: ' + rawId);
     }
     const itemId = idMatch[1];
+    const requestedSkuId = isValidSkuId(kwargs.sku) ? String(kwargs.sku).trim() : extractSkuIdFromUrl(rawId);
     const fetchReviews = Boolean(kwargs.reviews);
     const fetchDesc = Boolean(kwargs.desc);
 
@@ -91,7 +212,12 @@ export const command = cli({
         throw new Error('仅支持淘宝或天猫商品链接: ' + parsed.hostname);
       }
       parsed.protocol = 'https:';
+      if (requestedSkuId && !parsed.searchParams.get('skuId')) {
+        parsed.searchParams.set('skuId', requestedSkuId);
+      }
       targetUrl = parsed.toString();
+    } else if (requestedSkuId) {
+      targetUrl += '&skuId=' + encodeURIComponent(requestedSkuId);
     }
 
     // Establish same-site Taobao referer before entering item LP to avoid cold-hit WAF slider
@@ -321,6 +447,7 @@ export const command = cli({
               skuVariants.push({
                 index: idx,
                 sku_id: String(sku.skuId),
+                has_real_sku_id: true,
                 name,
                 price: skuPrice,
                 original_price: skuOrigPrice && skuOrigPrice > skuPrice ? skuOrigPrice : null,
@@ -341,6 +468,7 @@ export const command = cli({
                 skuVariants.push({
                   index: idx++,
                   sku_id: String(val.vid || idx),
+                  has_real_sku_id: false,
                   name,
                   price: basePrice,
                   original_price: originalPrice || null,
@@ -365,6 +493,7 @@ export const command = cli({
             const isAccessory = isAccessorySkuName(text, basePrice);
             skuVariants.push({
               index: idx,
+              has_real_sku_id: false,
               name: text,
               price: basePrice,
               image_url: skuImg,
@@ -571,12 +700,26 @@ export const command = cli({
           specifications: specs,
           desc_images: descImages,
           reviews: reviewData,
+          page_url: location.href,
           url: 'https://item.taobao.com/item.htm?id=' + ${JSON.stringify(itemId)},
           extraction_mode: res ? 'ice_app_context' : 'dom_fallback',
         };
       })()
     `);
 
-    return detailData;
+    return enrichDetailWithSkuUrls(detailData, {
+      itemId,
+      requestedUrl: rawId,
+      requestedSkuId,
+    });
   }
 });
+
+export const __test__ = {
+  isValidSkuId,
+  extractSkuIdFromUrl,
+  resolveCanonicalBaseUrl,
+  buildTaobaoSkuUrl,
+  pickDefaultSkuId,
+  enrichDetailWithSkuUrls,
+};

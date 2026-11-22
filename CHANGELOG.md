@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026-11-22] - 2026-11-22
+
+### Added
+- `detail.js`: Default SKU-pinned URLs (`&skuId=<skuId>`) on both top-level `url` and every real `sku_variants[].url`, preserving canonical Tmall/Taobao hosts (`detail.tmall.com` vs `item.taobao.com`), exposing `base_url` + `selected_sku_id`, and adding optional `--sku <skuId>` targeting (never fabricating `skuId` on non-SKU prop `vid` fallbacks).
+- `resolve-link.js`: Preserves `skuId` and Tmall host in `canonical_url` and emits `sku_id`.
+- `tests/sku_url.test.js`: Added deterministic Rung 4 contract tests covering default SKU pinning, explicit `--sku` / URL `skuId`, Tmall host preservation, fallback non-fabrication, and `resolve-link` preservation.
+
 ## [2026-11-19] - 2026-11-19
 
 ### Fixed

@@ -68,6 +68,9 @@ opencli taobao market "小个子秋装连衣裙" --pages 2 --min-price 50 --max-
 # 9. Shop detail & full in-shop product listing
 opencli taobao shop "anker" --sort sales --pages 2 --limit 24 -f table
 
+# 9b. Item landing-page detail with default SKU-pinned direct URLs (`&skuId=`)
+opencli taobao detail 818133532091 --sku 5803089158235 -f json
+
 # 10. Product Q&A ("问大家"), visual image search, similar items, suggestions & short-link resolver
 opencli taobao questions 818133532091 --limit 20 -f table
 opencli taobao image-search ./sample.jpg --limit 20 -f table

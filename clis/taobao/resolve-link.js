@@ -6,17 +6,29 @@ function extractUrlFromShareText(input) {
   return urlMatch ? urlMatch[0] : null;
 }
 
+const CANONICAL_TAOBAO_HOSTS = new Set([
+  'item.taobao.com',
+  'detail.tmall.com',
+  'detail.tmall.hk',
+  'chaoshi.detail.tmall.com',
+]);
+
 function extractCanonicalItem(urlStr) {
   try {
     const u = new URL(urlStr);
     const id = u.searchParams.get('id') || u.searchParams.get('offerId') || urlStr.match(/\/offer\/(\d{6,})\.html/i)?.[1] || null;
+    const rawSku = u.searchParams.get('skuId') || u.searchParams.get('skuid') || '';
+    const skuId = /^\d{6,20}$/.test(rawSku.trim()) ? rawSku.trim() : null;
     const is1688 = u.hostname.includes('1688.com');
+    const host = CANONICAL_TAOBAO_HOSTS.has(u.hostname.toLowerCase()) ? u.hostname.toLowerCase() : 'item.taobao.com';
     const canonicalUrl = id
-      ? (is1688 ? `https://detail.1688.com/offer/${id}.html` : `https://item.taobao.com/item.htm?id=${id}`)
+      ? (is1688
+        ? `https://detail.1688.com/offer/${id}.html`
+        : `https://${host}/item.htm?id=${id}${skuId ? `&skuId=${skuId}` : ''}`)
       : urlStr;
-    return { item_id: id, platform: is1688 ? '1688' : 'taobao', canonical_url: canonicalUrl };
+    return { item_id: id, sku_id: is1688 ? null : skuId, platform: is1688 ? '1688' : (host.includes('tmall') ? 'tmall' : 'taobao'), canonical_url: canonicalUrl };
   } catch {
-    return { item_id: null, platform: 'unknown', canonical_url: urlStr };
+    return { item_id: null, sku_id: null, platform: 'unknown', canonical_url: urlStr };
   }
 }
 
@@ -31,7 +43,7 @@ export const command = cli({
   args: [
     { name: 'input', positional: true, required: true, help: '短链接或包含分享口令与短链的完整分享文本' },
   ],
-  columns: ['item_id', 'platform', 'canonical_url', 'resolved_url'],
+  columns: ['item_id', 'sku_id', 'platform', 'canonical_url', 'resolved_url'],
   func: async (args) => {
     const raw = String(args?.input || '').trim();
     const candidateUrl = extractUrlFromShareText(raw);
