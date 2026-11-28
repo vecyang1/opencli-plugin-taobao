@@ -1,19 +1,46 @@
 import { cli, Strategy } from '@jackwener/opencli/registry';
 import { AuthRequiredError } from '@jackwener/opencli/errors';
 
+function extractItemIdFromAttrs({ id = '', spmActId = '', dataNid = '', href = '' } = {}) {
+  const candidates = [id, spmActId, dataNid];
+  for (const raw of candidates) {
+    const s = String(raw || '').trim();
+    const m = s.match(/^(?:item_id_)?(\d{8,16})$/);
+    if (m) return m[1];
+  }
+  const h = String(href || '');
+  const hm = h.match(/[?&](?:id|item_id|itemId|nid)=(\d{8,16})/);
+  return hm ? hm[1] : null;
+}
+
+function normalizeMarketItemUrl(rawHref, itemId) {
+  const id = String(itemId || '').trim();
+  const h = String(rawHref || '').trim();
+  const normalized = h.startsWith('//') ? 'https:' + h : h;
+  if (/^https?:\/\/(?:item\.taobao\.com|detail\.tmall\.com|detail\.tmall\.hk|chaoshi\.detail\.tmall\.com)\/item\.htm/i.test(normalized)) {
+    try {
+      const u = new URL(normalized);
+      return `https://${u.hostname.toLowerCase()}/item.htm?id=${encodeURIComponent(id)}`;
+    } catch {
+      // fall through
+    }
+  }
+  return `https://item.taobao.com/item.htm?id=${encodeURIComponent(id)}`;
+}
+
 export const command = cli({
   site: 'taobao',
   name: 'market',
   access: 'read',
-  description: '搜索淘宝全网在售商品进行市场调研与价格分析 (支持关键词、排序、多页翻页)',
+  description: '搜索淘宝全网在售商品进行市场调研与价格分析 (默认多页翻页抓取，覆盖热卖榜与自然商品卡片，支持排序、价格区间与频道筛选)',
   domain: 's.taobao.com',
   strategy: Strategy.COOKIE,
   browser: true,
   navigateBefore: false,
   args: [
     { name: 'query', positional: true, required: true, help: '商品搜索关键词，例如: 背带裙、充电宝' },
-    { name: 'pages', type: 'int', required: false, help: '抓取页数 (默认按 limit 自动计算，每页约 44 件商品)' },
-    { name: 'limit', type: 'int', required: false, help: '返回商品最大数量 (默认 40)' },
+    { name: 'pages', type: 'int', required: false, help: '抓取页数 (默认按 limit 自动翻页，每页约 44-50 件商品)' },
+    { name: 'limit', type: 'int', required: false, help: '返回商品最大数量 (默认 80，自动翻页)' },
     { name: 'max-pages', type: 'int', required: false, help: '最大翻页上限 (默认 10，支持 1-20)' },
     { name: 'all', type: 'bool', default: false, help: '是否深度翻页抓取 (最多抓取 10 页)' },
     { name: 'sort', required: false, help: '排序规则: default (综合), sale-desc (销量高到低), price-asc (价格低到高), price-desc (价格高到低)' },
@@ -29,6 +56,7 @@ export const command = cli({
     'shop',
     'location',
     'badges',
+    'page',
     'url',
     'image_url',
   ],
@@ -62,13 +90,13 @@ export const command = cli({
     } else if (hasExplicitPages) {
       const p = Math.max(1, Math.min(Math.floor(rawPages), maxPagesCap));
       maxPages = p;
-      limit = hasExplicitLimit ? Math.max(1, Math.floor(rawLimit)) : p * 44;
+      limit = hasExplicitLimit ? Math.max(1, Math.floor(rawLimit)) : p * 48;
     } else if (hasExplicitLimit) {
       limit = Math.max(1, Math.floor(rawLimit));
       maxPages = maxPagesCap;
     } else {
-      limit = 40;
-      maxPages = 1;
+      limit = 80;
+      maxPages = Math.min(3, maxPagesCap);
     }
 
     let sortParam = '';
@@ -140,21 +168,21 @@ export const command = cli({
       const pageItems = await page.evaluate(`
         (() => {
           const results = [];
-          const links = Array.from(document.querySelectorAll('a[href*="item.taobao.com/item.htm"], a[href*="detail.tmall.com/item.htm"], a[href*="detail.tmall.hk/"], a[href*="chaoshi.detail.tmall.com/item.htm"], a[href*="yao.95095.com/"]'));
+          const seenInPage = new Set();
 
-          for (const a of links) {
-            const href = a.getAttribute('href') || '';
-            const idMatch = href.match(/[?&]id=(\\d+)/);
-            if (!idMatch) continue;
-            const itemId = idMatch[1];
+          function extractCard(node, explicitItemId, rawHref) {
+            const itemId = explicitItemId;
+            if (!itemId || seenInPage.has(itemId)) return;
 
-            let card = a.closest('[class*="Card--"], [class*="item--"], [class*="doubleCardWrapper"], [class*="itemWrapper"]') || a.parentElement;
+            let card = node.matches && node.matches('[id^="item_id_"], [class*="doubleCardWrapper"], [class*="Card--"]')
+              ? node
+              : (node.closest('[id^="item_id_"], [class*="doubleCardWrapper"], [class*="Card--"], [class*="item--"], [class*="itemWrapper"]') || node.parentElement);
             for (let i = 0; i < 4 && card && card.innerText && card.innerText.length < 30; i++) {
               if (card.parentElement) card = card.parentElement;
             }
 
-            const cardText = card ? card.innerText : a.innerText;
-            if (!cardText || cardText.length < 10) continue;
+            const cardText = card ? card.innerText : (node.innerText || '');
+            if (!cardText || cardText.length < 10) return;
 
             let title = '';
             const titleEl = card ? card.querySelector('[class*="title--"], [class*="Title--"], [class*="itemTitle"], h3, h4') : null;
@@ -165,6 +193,7 @@ export const command = cli({
               const textLines = lines.filter(l => !l.startsWith('¥') && !l.startsWith('￥') && !l.includes('人付款') && l.length > 5);
               title = textLines[0] || lines[0] || '';
             }
+            if (!title) return;
 
             let price = '0';
             const intEl = card ? card.querySelector('[class*="priceInt--"], [class*="PriceInt--"]') : null;
@@ -181,13 +210,13 @@ export const command = cli({
             }
 
             let sales = '0人付款';
-            const salesMatch = cardText.match(/(\\d+(?:\\.\\d+)?[万kw]?\\+?)\\s*人付款|(\\d+(?:\\.\\d+)?[万kw]?\\+?)\\s*人收货|已售\\s*(\\d+)/);
+            const salesMatch = cardText.match(/(\\d+(?:\\.\\d+)?[万kw]?\\+?)\\s*人付款|(\\d+(?:\\.\\d+)?[万kw]?\\+?)\\s*人收货|已售\\s*(\\d+(?:\\.\\d+)?[万kw]?\\+?)/);
             if (salesMatch) {
               sales = salesMatch[0];
             }
 
             let shop = '淘宝店铺';
-            const shopEl = card ? card.querySelector('[class*="ShopInfo--"], [class*="shopName--"], [class*="shop--"], a[href*="shop.taobao.com"], a[href*="store.taobao.com"]') : null;
+            const shopEl = card ? card.querySelector('[class*="shopNameText--"], [class*="ShopInfo--"], [class*="shopName--"], [class*="shop--"], a[href*="shop.taobao.com"], a[href*="store.taobao.com"]') : null;
             if (shopEl && shopEl.innerText.trim()) {
               shop = shopEl.innerText.trim();
             } else {
@@ -204,6 +233,8 @@ export const command = cli({
             }
 
             const badges = [];
+            if (/热卖|榜/.test(cardText)) badges.push('热卖榜');
+            if (/百亿补贴/.test(cardText)) badges.push('百亿补贴');
             if (/双11/.test(cardText)) badges.push('双11');
             if (/退货宝/.test(cardText)) badges.push('退货宝');
             if (/包邮/.test(cardText)) badges.push('包邮');
@@ -212,9 +243,13 @@ export const command = cli({
             if (/3期|免息/.test(cardText)) badges.push('分期免息');
             if (/公益宝贝/.test(cardText)) badges.push('公益宝贝');
 
-            let detailUrl = href;
+            let detailUrl = String(rawHref || '');
             if (detailUrl.startsWith('//')) detailUrl = 'https:' + detailUrl;
-            else if (!detailUrl.startsWith('http')) detailUrl = 'https://item.taobao.com/item.htm?id=' + itemId;
+            const isDirectItem = /^https?:\\/\\/(?:item\\.taobao\\.com|detail\\.tmall\\.com|detail\\.tmall\\.hk|chaoshi\\.detail\\.tmall\\.com)\\/item\\.htm/i.test(detailUrl);
+            if (!isDirectItem) {
+              const isTmallCard = /天猫|旗舰店|官方旗舰/.test(shop) && /tmall/i.test(card?.innerHTML || '');
+              detailUrl = (isTmallCard ? 'https://detail.tmall.com/item.htm?id=' : 'https://item.taobao.com/item.htm?id=') + itemId;
+            }
 
             let imageUrl = '';
             const imgEl = card ? card.querySelector('img[src*="alicdn"], img[src*="taobaocdn"], img[data-src*="alicdn"], img[class*="mainPic"], img[class*="pic"], img') : null;
@@ -230,6 +265,7 @@ export const command = cli({
               }
             }
 
+            seenInPage.add(itemId);
             results.push({
               item_id: itemId,
               title: title.slice(0, 150),
@@ -243,15 +279,40 @@ export const command = cli({
             });
           }
 
+          // Pass 1: Unified Taobao 2025/2026 search cards carrying id="item_id_<id>" (covers hot-ranked & simba-wrapped listings as well as organic cards)
+          const idCards = Array.from(document.querySelectorAll('[id^="item_id_"], [data-spm-act-id]'));
+          for (const el of idCards) {
+            const idAttr = (el.getAttribute('id') || '').trim();
+            const spmAttr = (el.getAttribute('data-spm-act-id') || '').trim();
+            const m = idAttr.match(/^item_id_(\\d{8,16})$/) || spmAttr.match(/^(\\d{8,16})$/);
+            if (!m) continue;
+            const href = el.getAttribute('href') || (el.querySelector('a[href]') ? el.querySelector('a[href]').getAttribute('href') : '') || '';
+            extractCard(el, m[1], href);
+          }
+
+          // Pass 2: Direct item.taobao.com / detail.tmall.com links fallback
+          const links = Array.from(document.querySelectorAll('a[href*="item.taobao.com/item.htm"], a[href*="detail.tmall.com/item.htm"], a[href*="detail.tmall.hk/"], a[href*="chaoshi.detail.tmall.com/item.htm"], a[href*="yao.95095.com/"]'));
+          for (const a of links) {
+            const href = a.getAttribute('href') || '';
+            const idMatch = href.match(/[?&]id=(\\d{8,16})/);
+            if (!idMatch) continue;
+            extractCard(a, idMatch[1], href);
+          }
+
           return results;
         })()
       `);
 
       const prevTotal = allItems.length;
+      const prevFingerprint = pageItems.slice(0, 3).map(it => it.item_id).join(',');
       for (const item of pageItems) {
         if (!seenIds.has(item.item_id)) {
           seenIds.add(item.item_id);
-          allItems.push(item);
+          allItems.push({
+            ...item,
+            page: p,
+            url: normalizeMarketItemUrl(item.url, item.item_id),
+          });
         }
       }
       const addedThisPage = allItems.length - prevTotal;
@@ -263,6 +324,7 @@ export const command = cli({
       const hasNext = await page.evaluate(`
         (() => {
           const selectors = [
+            'button.next-pagination-item.next-next',
             '.next-pagination-item.next-next button',
             '.next-pagination-item.next-next a',
             '.next-pagination-item.next-next',
@@ -294,6 +356,7 @@ export const command = cli({
               container.classList.contains('disabled') ||
               (container.getAttribute('aria-disabled') === 'true');
             if (!isDisabled) {
+              nextBtn.scrollIntoView({ block: 'center' });
               nextBtn.click();
               return true;
             }
@@ -305,20 +368,22 @@ export const command = cli({
       if (hasNext) {
         let flipped = false;
         const targetPage = p + 1;
-        for (let waitStep = 0; waitStep < 10; waitStep++) {
+        for (let waitStep = 0; waitStep < 12; waitStep++) {
           await page.wait(0.6);
-          const currentPageNum = await page.evaluate(`
+          const flipCheck = await page.evaluate(`
             (() => {
               const cur = document.querySelector('.next-pagination-item.next-current, .ant-pagination-item-active');
-              if (cur && cur.innerText) {
-                const n = parseInt(cur.innerText.trim(), 10);
-                if (!isNaN(n)) return n;
-              }
-              return null;
+              const curNum = cur && cur.innerText ? parseInt(cur.innerText.trim(), 10) : null;
+              const topIds = Array.from(document.querySelectorAll('[id^="item_id_"]')).slice(0, 3).map(el => (el.id || '').replace(/^item_id_/, ''));
+              return {
+                curNum: Number.isFinite(curNum) ? curNum : null,
+                fp: topIds.join(','),
+              };
             })()
           `);
-          if (currentPageNum === targetPage) {
+          if (flipCheck?.curNum === targetPage || (flipCheck?.fp && prevFingerprint && flipCheck.fp !== prevFingerprint)) {
             flipped = true;
+            await page.wait(0.8);
             break;
           }
         }
@@ -337,3 +402,8 @@ export const command = cli({
     return allItems.slice(0, limit);
   },
 });
+
+export const __test__ = {
+  extractItemIdFromAttrs,
+  normalizeMarketItemUrl,
+};

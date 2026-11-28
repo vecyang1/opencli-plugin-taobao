@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2026-11-28] - 2026-11-28
+
+### Fixed
+- `market.js`: Fixed 70%+ top-seller drop on 2025/2026 Taobao search pages by scanning `[id^="item_id_"]` and `data-spm-act-id` cards first (capturing hot-ranked and `click.simba.taobao.com`-wrapped official flagship listings) before direct link fallback, normalizing item URLs, tagging each item with `page`, and tightening next-page click + fingerprint flip detection.
+- `detail.js`: Extracted structured buyer reviews directly from `window.__ICE_APP_CONTEXT__` (`componentsVO.rateVO.group.items` / `rateList`) at zero extra network cost (even without `--reviews`), and hardened DOM fallback review parsing to exclude date/metadata lines from review content.
+
+### Changed
+- `market.js`: Raised default multi-page capture when neither `--limit` nor `--pages` is passed from 1 page (40 items) to aggressive multi-page discovery (80 items / up to 3 pages), while strictly honoring explicit `--pages` and `--limit`.
+- `tests/market_and_reviews.test.js`: Added Rung 4 tests covering `item_id_` / `simba` card ID extraction, canonical URL normalization, pagination selectors, and `rateVO` structured review parsing.
+
 ## [2026-11-22] - 2026-11-22
 
 ### Added

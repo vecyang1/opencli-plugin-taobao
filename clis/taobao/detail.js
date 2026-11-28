@@ -160,6 +160,39 @@ function enrichDetailWithSkuUrls(detailData, { itemId, requestedUrl = '', reques
   };
 }
 
+function parseRateVoReviews(rateVO) {
+  if (!rateVO || typeof rateVO !== 'object') return [];
+  const rawItems = Array.isArray(rateVO?.group?.items)
+    ? rateVO.group.items
+    : (Array.isArray(rateVO?.rateList) ? rateVO.rateList : []);
+  const out = [];
+  for (const item of rawItems.slice(0, 20)) {
+    const content = String(item?.content || item?.rateContent || item?.feedback || '').replace(/[\r\n]+/g, ' ').trim();
+    if (!content) continue;
+    const rawPics = Array.isArray(item?.images)
+      ? item.images
+      : (Array.isArray(item?.feedPicList) ? item.feedPicList : (Array.isArray(item?.pics) ? item.pics : []));
+    const photos = rawPics
+      .map((p) => {
+        const raw = typeof p === 'string' ? p : (p?.url || p?.thumbnail || '');
+        let s = String(raw || '').trim();
+        if (!s || s.startsWith('data:')) return '';
+        if (s.startsWith('//')) s = 'https:' + s;
+        if (s.startsWith('http://')) s = 'https://' + s.slice(7);
+        return s.replace(/(\.(?:jpe?g|png|gif))_.+$/i, '$1');
+      })
+      .filter((u) => /^https:\/\//i.test(u));
+    out.push({
+      user: String(item?.userName || item?.displayUserNick || item?.userNick || '淘友').slice(0, 15),
+      date: String(item?.dateTime || item?.rateDate || item?.createTime || '').slice(0, 12),
+      sku: String(item?.skuInfo || item?.auctionSku || '').replace(/^已购\s*/, '').replace(/[\r\n]+/g, ' ').slice(0, 60),
+      content: content.slice(0, 260),
+      photos: Array.from(new Set(photos)),
+    });
+  }
+  return out;
+}
+
 export const command = cli({
   site: 'taobao',
   name: 'detail',
@@ -593,44 +626,73 @@ export const command = cli({
           }
         }
 
-        // 10. Customer Reviews & Rate Summary (if requested)
+        // 10. Customer Reviews & Rate Summary (always harvest zero-cost structured rateVO.group.items; expand on --reviews)
         const rateVO = res?.componentsVO?.rateVO || null;
         const favorableRate = (typeof rateVO?.favorableRate === 'string' || typeof rateVO?.favorableRate === 'number') ? String(rateVO.favorableRate) : null;
         const rateKeywords = Array.isArray(rateVO?.keywords)
           ? rateVO.keywords.map(k => (typeof k === 'object' && k.title ? (k.count ? (k.title + '(' + k.count + ')') : k.title) : String(k))).filter(Boolean)
           : [];
 
+        const structuredRateItems = [];
+        const rawRateList = Array.isArray(rateVO?.group?.items)
+          ? rateVO.group.items
+          : (Array.isArray(rateVO?.rateList) ? rateVO.rateList : []);
+        for (const item of rawRateList.slice(0, 20)) {
+          const content = String(item?.content || item?.rateContent || item?.feedback || '').replace(/[\\r\\n]+/g, ' ').trim();
+          if (!content) continue;
+          const rawPics = Array.isArray(item?.images)
+            ? item.images
+            : (Array.isArray(item?.feedPicList) ? item.feedPicList : (Array.isArray(item?.pics) ? item.pics : []));
+          const photos = rawPics.map(p => cleanImageUrl(typeof p === 'string' ? p : (p?.url || p?.thumbnail || ''))).filter(Boolean);
+          structuredRateItems.push({
+            user: String(item?.userName || item?.displayUserNick || item?.userNick || '淘友').slice(0, 15),
+            date: String(item?.dateTime || item?.rateDate || item?.createTime || '').slice(0, 12),
+            sku: String(item?.skuInfo || item?.auctionSku || '').replace(/^已购\\s*/, '').replace(/[\\r\\n]+/g, ' ').slice(0, 60),
+            content: content.slice(0, 260),
+            photos: Array.from(new Set(photos)),
+          });
+        }
+
         let reviewData = {
-          review_count: parseInt(String(rateVO?.totalCount || '0').replace(/\\D/g, ''), 10) || 0,
+          review_count: parseInt(String(rateVO?.totalCount || '0').replace(/\\D/g, ''), 10) || structuredRateItems.length || 0,
           favorable_rate: favorableRate,
           rate_keywords: rateKeywords,
-          reviews: []
+          reviews: structuredRateItems
         };
 
         if (${fetchReviews}) {
-          // 10a. Extract already-rendered DOM review cards first (zero extra network hits)
+          const seenReviewKeys = new Set(structuredRateItems.map(r => (r.date + '|' + r.content.slice(0, 30))));
+
+          // 10a. Extract rendered DOM review cards (filtering out pure date/meta lines)
           const domReviews = [];
           const domCards = Array.from(document.querySelectorAll('[class*="Comment--"], [class*="commentItem--"], [class*="rateItem--"], [class*="RateItem--"]'));
-          for (const card of domCards.slice(0, 15)) {
+          for (const card of domCards.slice(0, 20)) {
             const cardText = (card.innerText || '').trim();
-            if (cardText.length < 6) continue;
+            if (cardText.length < 8) continue;
             const pics = Array.from(card.querySelectorAll('img')).map(im => cleanImageUrl(im.getAttribute('data-src') || im.src || '')).filter(u => u && !u.includes('avatar') && !u.includes('star') && !u.includes('icon'));
             const lines = cardText.split('\\n').map(l => l.trim()).filter(Boolean);
-            const contentLine = lines.slice().sort((a, b) => b.length - a.length)[0] || cardText;
+            const contentCandidates = lines.filter(l => !/^\\d{4}[-./年]\\d{1,2}[-./月]\\d{1,2}/.test(l) && !/^(?:已购|颜色分类|规格|赞|评论|有用|\\d+天前|\\d+个月前)/.test(l) && l.length >= 2);
+            const contentLine = contentCandidates.slice().sort((a, b) => b.length - a.length)[0] || '';
+            if (!contentLine || /^\\d{4}[-./年]\\d{1,2}/.test(contentLine)) continue;
+            const dateStr = (cardText.match(/\\d{4}[-./年]\\d{1,2}[-./月]\\d{1,2}/)?.[0] || '').slice(0, 12);
+            const key = dateStr + '|' + contentLine.slice(0, 30);
+            if (seenReviewKeys.has(key)) continue;
+            seenReviewKeys.add(key);
             domReviews.push({
               user: (lines[0] || '淘友').slice(0, 15),
-              date: (cardText.match(/\\d{4}[-./年]\\d{1,2}[-./月]\\d{1,2}/)?.[0] || '').slice(0, 12),
-              sku: (lines.find(l => /规格|颜色|套餐|版本|已购/.test(l)) || '').slice(0, 50),
-              content: contentLine.replace(/[\\r\\n]+/g, ' ').slice(0, 220),
+              date: dateStr,
+              sku: (lines.find(l => /规格|颜色|套餐|版本|已购/.test(l)) || '').replace(/^已购\\s*/, '').slice(0, 60),
+              content: contentLine.replace(/[\\r\\n]+/g, ' ').slice(0, 260),
               photos: Array.from(new Set(pics)),
             });
           }
 
-          // 10b. Try rate.tmall.com JSONP fallback if DOM reviews empty
           if (domReviews.length > 0) {
-            reviewData.reviews = domReviews;
-            if (!reviewData.review_count) reviewData.review_count = domReviews.length;
-          } else {
+            reviewData.reviews = [...reviewData.reviews, ...domReviews].slice(0, 20);
+          }
+
+          // 10b. Try rate.tmall.com JSONP fallback if reviews still sparse
+          if (reviewData.reviews.length < 3) {
             let sellerId = String(res?.seller?.userId || res?.seller?.sellerId || '');
             if (!sellerId) {
               const pageHtml = document.documentElement.innerHTML || '';
@@ -655,8 +717,8 @@ export const command = cli({
                   return {
                     user: (item.displayUserNick || item.userNick || item.user?.nick || '淘友').slice(0, 15),
                     date: (item.rateDate || item.date || '').slice(0, 12),
-                    sku: (item.auctionSku || item.auction?.sku || '').replace(/[\\r\\n]+/g, ' ').slice(0, 50),
-                    content: (item.rateContent || item.content || '').replace(/[\\r\\n]+/g, ' ').slice(0, 220),
+                    sku: (item.auctionSku || item.auction?.sku || '').replace(/[\\r\\n]+/g, ' ').slice(0, 60),
+                    content: (item.rateContent || item.content || '').replace(/[\\r\\n]+/g, ' ').slice(0, 260),
                     photos: photos.map(p => cleanImageUrl(p)).filter(Boolean),
                   };
                 });
@@ -672,7 +734,14 @@ export const command = cli({
               setTimeout(() => cleanup({ review_count: reviewData.review_count, reviews: [] }), 6000);
             });
             reviewData.review_count = fetched.review_count || reviewData.review_count;
-            reviewData.reviews = fetched.reviews || [];
+            for (const r of (fetched.reviews || [])) {
+              const key = (r.date || '') + '|' + (r.content || '').slice(0, 30);
+              if (r.content && !seenReviewKeys.has(key)) {
+                seenReviewKeys.add(key);
+                reviewData.reviews.push(r);
+              }
+            }
+            reviewData.reviews = reviewData.reviews.slice(0, 20);
           }
         }
 
@@ -722,4 +791,5 @@ export const __test__ = {
   buildTaobaoSkuUrl,
   pickDefaultSkuId,
   enrichDetailWithSkuUrls,
+  parseRateVoReviews,
 };
